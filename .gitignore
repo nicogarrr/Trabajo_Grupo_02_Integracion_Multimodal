@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+
+.venv/
+vision/.venv/
+vision/Include/
+vision/Lib/
+vision/Scripts/
+vision/share/
+vision/pyvenv.cfg
+
+event_*.json
+event_*.json.tmp
+logs/
+
+vision/modelo_exportado/
+
+# LaTeX files
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk

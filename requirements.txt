@@ -1,0 +1,13 @@
+numpy
+scikit-learn
+opencv-python
+mediapipe
+torch
+transformers
+Pillow
+faster-whisper
+sounddevice
+scipy
+
+# Solo si se reentrena localmente fuera de Colab:
+# mediapipe-model-maker

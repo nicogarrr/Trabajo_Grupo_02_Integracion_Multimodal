@@ -1,0 +1,831 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[spanish]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage{amsmath}
+
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, fit}
+
+\geometry{margin=2.4cm}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!55!black,
+    urlcolor=blue!55!black,
+    citecolor=blue!55!black
+}
+
+\pagestyle{fancy}
+\setlength{\headheight}{14.5pt}
+\fancyhf{}
+\lhead{Practica Final IMM}
+\rhead{ChefZeroWaste}
+\cfoot{\thepage\ de \pageref{LastPage}}
+
+\definecolor{codegray}{RGB}{245,245,245}
+\definecolor{codeborder}{RGB}{210,210,210}
+\definecolor{keywordblue}{RGB}{0,70,140}
+\definecolor{commentgreen}{RGB}{0,110,70}
+\definecolor{stringred}{RGB}{150,40,40}
+
+\lstdefinestyle{codestyle}{
+    backgroundcolor=\color{codegray},
+    basicstyle=\ttfamily\scriptsize,
+    breaklines=true,
+    frame=single,
+    rulecolor=\color{codeborder},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    keywordstyle=\color{keywordblue}\bfseries,
+    commentstyle=\color{commentgreen},
+    stringstyle=\color{stringred},
+    showstringspaces=false,
+    tabsize=4,
+    captionpos=b
+}
+\lstset{style=codestyle}
+
+\newcommand{\codepath}[1]{\texttt{\detokenize{#1}}}
+
+\newcommand{\capturapendiente}[2]{
+    \begin{figure}[H]
+        \centering
+        \IfFileExists{figuras/#1}{
+            \includegraphics[width=0.92\linewidth]{figuras/#1}
+        }{
+            \fbox{
+                \begin{minipage}[c][5.5cm][c]{0.88\linewidth}
+                    \centering
+                    \textbf{Captura pendiente}\\[0.25cm]
+                    Guardar como \codepath{figuras/#1}\\[0.25cm]
+                    #2
+                \end{minipage}
+            }
+        }
+        \caption{#2}
+        \label{fig:#1}
+    \end{figure}
+}
+
+\title{
+    \textbf{Practica Final -- Vision Artificial en IMM}\\
+    \large Integracion Multimodal en ChefZeroWaste
+}
+\author{
+    Sergio Pociño \and Sergio Botana \and Nicolas Iglesias
+}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\begin{abstract}
+Este documento describe la practica final de Vision Artificial para la asignatura de Interfaces Multimodales. El sistema desarrollado integra un canal visual basado en gestos personalizados, un canal textual de PLN procedente del agente ChefZeroWaste y un integrador de fusion semantica tardia. Ademas, se documenta la ampliacion opcional de embeddings multimodales con CLIP, que permite emparejar comandos textuales libres con gestos visuales mediante similitud coseno en un espacio semantico compartido.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Composicion del grupo}
+
+\begin{itemize}
+    \item Sergio Pociño.
+    \item Sergio Botana.
+    \item Nicolas Iglesias.
+\end{itemize}
+
+\section{Resumen del sistema}
+
+La aplicacion final se basa en el dominio ChefZeroWaste. El objetivo es que el usuario pueda interactuar con un asistente de cocina mediante dos canales complementarios:
+
+\begin{itemize}
+    \item \textbf{Canal visual}: reconoce gestos personalizados entrenados con MediaPipe Model Maker.
+    \item \textbf{Canal textual}: clasifica intenciones PLN del agente ChefZeroWaste.
+    \item \textbf{Integrador}: recibe eventos JSON con intencion y marca temporal, mantiene una ventana de memoria y ejecuta una accion final solo si la combinacion texto-vision es valida.
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \resizebox{\linewidth}{!}{%
+    \begin{tikzpicture}[
+        node distance=1.8cm,
+        box/.style={rectangle, rounded corners, draw=black!65, fill=blue!5, align=center, minimum width=3.6cm, minimum height=1cm},
+        event/.style={rectangle, draw=black!65, fill=yellow!15, align=center, minimum width=3.4cm, minimum height=0.9cm},
+        action/.style={rectangle, rounded corners, draw=black!65, fill=green!12, align=center, minimum width=4.2cm, minimum height=1cm},
+        arrow/.style={-{Latex[length=3mm]}, thick}
+    ]
+        \node[box] (vision) {Canal visual\\MediaPipe Gestures};
+        \node[event, right=of vision] (evvision) {\codepath{event_vision.json}\\intent + timestamp};
+        \node[box, below=1.7cm of vision] (texto) {Canal textual\\PLN ChefZeroWaste};
+        \node[event, right=of texto] (evtexto) {\codepath{event_text.json}\\intent + timestamp};
+        \node[box, right=2.2cm of evvision, yshift=-0.85cm] (integrador) {Integrador multimodal\\ventana temporal};
+        \node[action, right=of integrador] (accion) {Accion final\\receta, raciones o sustitucion};
+
+        \draw[arrow] (vision) -- (evvision);
+        \draw[arrow] (texto) -- (evtexto);
+        \draw[arrow] (evvision) -- (integrador);
+        \draw[arrow] (evtexto) -- (integrador);
+        \draw[arrow] (integrador) -- (accion);
+    \end{tikzpicture}
+    }
+    \caption{Arquitectura general de la fusion semantica tardia.}
+    \label{fig:arquitectura-general}
+\end{figure}
+
+\section{Descripcion de los puntos obligatorios}
+
+\subsection{1. Entrenamiento de gestos personalizados}
+
+\subsubsection{Diccionario visual}
+
+Se ha definido un diccionario visual de tres gestos personalizados nuevos, mas una clase negativa \codepath{None}. Los gestos estan adaptados al contexto de ChefZeroWaste:
+
+\begin{longtable}{p{0.28\linewidth} p{0.27\linewidth} p{0.34\linewidth}}
+\toprule
+\textbf{Clase del modelo} & \textbf{Intencion visual} & \textbf{Uso dentro de la aplicacion} \\
+\midrule
+\codepath{pizca_sal} & \codepath{iniciar_receta} & Gesto de ``vamos a cocinar''. Confirma el inicio de una recomendacion de receta. \\
+\codepath{corte_cuchillo} & \codepath{aumentar_raciones} & Gesto de partir o cortar. Se usa para adaptar la receta a mas raciones. \\
+\codepath{sustituir_ingrediente} & \codepath{marcar_sustitucion} & Gesto de cruz. Marca que se desea sustituir un ingrediente. \\
+\codepath{None} & Sin accion & Clase negativa para separar fondos o poses no intencionales de gestos validos. \\
+\bottomrule
+\end{longtable}
+
+La clase \codepath{None} no se considera uno de los tres gestos obligatorios, pero mejora la robustez del clasificador al permitir que el modelo aprenda ejemplos donde no debe publicar ningun evento visual.
+
+\subsubsection{Dataset local}
+
+El dataset local se encuentra en \codepath{vision/dataset}. La distribucion final de muestras es:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lr}
+        \toprule
+        \textbf{Clase} & \textbf{Muestras} \\
+        \midrule
+        \codepath{corte_cuchillo} & 86 \\
+        \codepath{None} & 82 \\
+        \codepath{pizca_sal} & 119 \\
+        \codepath{sustituir_ingrediente} & 125 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Distribucion de imagenes del dataset de gestos.}
+    \label{tab:dataset}
+\end{table}
+
+\capturapendiente{captura_dataset.png}{Vista de las carpetas del dataset local con las cuatro clases de gestos.}
+
+\subsubsection{Captura de datos}
+
+La captura de muestras se realizo con el script \codepath{vision/captura_datos.py}. Este script abre la webcam, permite indicar la clase que se esta capturando y guarda las imagenes en la carpeta correspondiente del dataset. La estructura final permite que Model Maker cargue automaticamente cada subcarpeta como una clase.
+
+\capturapendiente{captura_captura_datos.png}{Ejecucion del script de captura mostrando la webcam y guardado de muestras.}
+
+\subsubsection{Transfer Learning con Model Maker}
+
+El entrenamiento se realizo en Google Colab mediante el cuaderno:
+
+\begin{center}
+\codepath{vision/Entrenamiento_Gestos.ipynb}
+\end{center}
+
+El cuaderno usa MediaPipe Model Maker para aplicar transfer learning sobre los modelos base de deteccion y representacion de manos. La practica conserva tambien un script equivalente para entrenamiento local:
+
+\begin{center}
+\codepath{vision/entrenar_gestos.py}
+\end{center}
+
+El flujo de entrenamiento fue:
+
+\begin{enumerate}
+    \item Cargar el dataset desde carpetas con \codepath{gesture_recognizer.Dataset.from_folder(...)}.
+    \item Dividir el dataset en entrenamiento, validacion y test.
+    \item Configurar hiperparametros con \codepath{gesture_recognizer.HParams(...)}.
+    \item Entrenar la capa final de clasificacion con \codepath{gesture_recognizer.GestureRecognizer.create(...)}.
+    \item Exportar el modelo final con \codepath{model.export_model()}.
+\end{enumerate}
+
+\capturapendiente{captura_colab_entrenamiento.png}{Entrenamiento en Google Colab con MediaPipe Model Maker.}
+
+El modelo final exportado se encuentra en:
+
+\begin{center}
+\codepath{vision/gesture_recognizer.task}
+\end{center}
+
+\subsubsection{Prediccion unimodal visual}
+
+El script de ejecucion visual es \codepath{vision/main.py}. Este carga el modelo \codepath{gesture_recognizer.task}, abre la webcam y publica eventos visuales en \codepath{event_vision.json}. Cada evento incluye fuente, intencion visual, gesto crudo, confianza y timestamp.
+
+\begin{lstlisting}[caption={Ejemplo de evento visual publicado por el canal de gestos.}]
+{
+  "source": "vision",
+  "intent": "iniciar_receta",
+  "gesture": "pizca_sal",
+  "timestamp": 1778945740.10,
+  "confidence": 0.91
+}
+\end{lstlisting}
+
+\capturapendiente{captura_vision_gestos.png}{Ejecucion de \codepath{vision/main.py} reconociendo un gesto y publicando eventos visuales.}
+
+\subsubsection{Codigo involucrado en el punto 1}
+
+El codigo completo esta incluido en la entrega. Los ficheros relevantes son:
+
+\begin{itemize}
+    \item \codepath{vision/captura_datos.py}: captura muestras desde webcam y las guarda por clase.
+    \item \codepath{vision/entrenar_gestos.py}: version local del entrenamiento con Model Maker.
+    \item \codepath{vision/Entrenamiento_Gestos.ipynb}: cuaderno usado en Colab.
+    \item \codepath{vision/main.py}: ejecucion del canal visual y publicacion de eventos.
+    \item \codepath{vision/gesture_recognizer.task}: modelo final exportado.
+\end{itemize}
+
+Fragmento clave del canal visual: las clases del modelo se traducen a intenciones semanticas antes de publicar el JSON.
+
+\begin{lstlisting}[language=Python, caption={Mapeo semantico del canal visual.}]
+INTENCIONES_VISUALES = {
+    "pizca_sal": "iniciar_receta",
+    "corte_cuchillo": "aumentar_raciones",
+    "sustituir_ingrediente": "marcar_sustitucion",
+}
+\end{lstlisting}
+
+\subsection{2. Integracion con el modulo de PLN}
+
+\subsubsection{Origen del modulo textual}
+
+El modulo de PLN parte del bloque anterior de la asignatura y del agente conversacional ChefZeroWaste. En el proyecto final se conserva una arquitectura basada en Bag of Words y clasificacion de intenciones. Las practicas de referencia de PLN de la asignatura son:
+
+\begin{itemize}
+    \item \codepath{S1TextClassificationBoW}: clasificacion con Bag of Words.
+    \item \codepath{S2TextClassificationVectorsSinGloVeVectors}: representaciones vectoriales.
+    \item \codepath{S3TextClassificationMLMeasures}: evaluacion con metricas de ML.
+\end{itemize}
+
+En la entrega final, el dominio ya no es generico, sino ChefZeroWaste: ingredientes disponibles, recomendaciones de recetas, raciones, lista de compra y sustituciones.
+
+\subsubsection{Intenciones textuales}
+
+El canal textual final esta implementado en \codepath{main_chef_zero_waste.py} y \codepath{CanalTextoChefZeroWaste.py}. Las intenciones clasificadas son:
+
+\begin{longtable}{p{0.32\linewidth} p{0.55\linewidth}}
+\toprule
+\textbf{Intencion textual} & \textbf{Descripcion} \\
+\midrule
+\codepath{instrucciones} & Solicitud de ayuda o ejemplos de uso. \\
+\codepath{anadir_ingredientes} & El usuario indica ingredientes disponibles. \\
+\codepath{recomendar_receta} & El usuario solicita una receta con restricciones, tiempo o ingredientes. \\
+\codepath{sustituir_ingrediente} & El usuario pide cambiar un ingrediente por restriccion o preferencia. \\
+\codepath{ajustar_raciones} & El usuario indica un numero de raciones o personas. \\
+\codepath{lista_compra} & El usuario solicita ingredientes faltantes. \\
+\bottomrule
+\end{longtable}
+
+El canal textual publica eventos en \codepath{event_text.json}. Estos eventos incorporan entidades extraidas, como ingredientes, raciones o restricciones.
+
+\begin{lstlisting}[caption={Ejemplo de evento textual publicado por el canal PLN.}]
+{
+  "source": "text",
+  "intent": "anadir_ingredientes",
+  "timestamp": 1778945740.10,
+  "raw_text": "tengo tomate pan y queso",
+  "entities": {
+    "ingredientes": ["tomate", "pan", "queso"],
+    "ingrediente_principal": "tomate"
+  }
+}
+\end{lstlisting}
+
+\capturapendiente{captura_chat_pln.png}{Consola de \codepath{main_chef_zero_waste.py} clasificando texto y publicando \codepath{event_text.json}.}
+
+\subsubsection{Complementariedad texto-vision}
+
+Las intenciones textuales no son una repeticion literal de los gestos. El texto aporta parametros concretos y el gesto aporta la intencion pragmatica o confirmacion visual.
+
+\begin{longtable}{p{0.25\linewidth} p{0.22\linewidth} p{0.22\linewidth} p{0.22\linewidth}}
+\toprule
+\textbf{Texto PLN} & \textbf{Gesto} & \textbf{Intencion visual} & \textbf{Complemento} \\
+\midrule
+\codepath{anadir_ingredientes} & \codepath{pizca_sal} & \codepath{iniciar_receta} & El texto dice los ingredientes; el gesto indica que se empieza a cocinar. \\
+\codepath{recomendar_receta} & \codepath{pizca_sal} & \codepath{iniciar_receta} & El texto aporta parametros; el gesto confirma la accion. \\
+\codepath{ajustar_raciones} & \codepath{corte_cuchillo} & \codepath{aumentar_raciones} & El texto indica el numero; el gesto expresa partir la receta. \\
+\codepath{sustituir_ingrediente} & \codepath{sustituir_ingrediente} & \codepath{marcar_sustitucion} & El texto indica ingrediente y restriccion; el gesto marca sustitucion. \\
+\bottomrule
+\end{longtable}
+
+Ejemplos de fusion no redundante:
+
+\begin{itemize}
+    \item ``tengo tomate, pan y queso'' + \codepath{pizca_sal}: generar una receta con esos ingredientes.
+    \item ``divide la receta para 4 personas'' + \codepath{corte_cuchillo}: adaptar la receta a cuatro raciones.
+    \item ``sustituye queso sin lactosa'' + gesto de cruz: aplicar sustitucion de ingrediente.
+\end{itemize}
+
+\subsubsection{Codigo involucrado en el punto 2}
+
+El modulo PLN completo se entrega en estos ficheros:
+
+\begin{itemize}
+    \item \codepath{main_chef_zero_waste.py}: entrada textual interactiva.
+    \item \codepath{CanalTextoChefZeroWaste.py}: clasificacion de intencion y publicacion de \codepath{event_text.json}.
+    \item \codepath{BoWChat.py}, \codepath{BowChatChefZeroWaste.py}: vectorizacion Bag of Words y categorias.
+    \item \codepath{BowChatChefZeroWaste_E1_Agente.py}: logica del agente ChefZeroWaste.
+    \item \codepath{BowChatChefZeroWaste_E2_STM.py}: memoria a corto plazo.
+    \item \codepath{Chat.py}, \codepath{RobustLinearSVC.py}: infraestructura base del clasificador.
+\end{itemize}
+
+Fragmento clave: el canal textual publica un evento comun que despues consume el integrador.
+
+\begin{lstlisting}[language=Python, caption={Publicacion del evento textual.}]
+save_multimodal_event(
+    event_path,
+    "text",
+    intent,
+    raw_text=self._last_raw_sentence,
+    entities=entities,
+    **extra_event_fields,
+)
+\end{lstlisting}
+
+\subsection{3. Fusion semantica tardia}
+
+\subsubsection{Integrador en Python}
+
+El integrador esta implementado en \codepath{IntegradorMultimodal.py}. Su funcion es recibir eventos empaquetados desde ambos canales:
+
+\begin{itemize}
+    \item \codepath{event_text.json}, producido por \codepath{CanalTextoChefZeroWaste.py}.
+    \item \codepath{event_vision.json}, producido por \codepath{vision/main.py}.
+\end{itemize}
+
+Ambos canales usan \codepath{multimodal_utils.py} para escribir eventos JSON de forma atomica y evitar conflictos de lectura/escritura en Windows.
+
+\subsubsection{Gestion de asincronia}
+
+La fusion no exige que texto y gesto ocurran en el mismo instante. El integrador mantiene una memoria temporal de eventos recientes y compara timestamps. En las pruebas finales se lanza con una ventana de 8000 ms:
+
+\begin{lstlisting}[caption={Ejecucion del integrador con ventana temporal.}]
+python IntegradorMultimodal.py --window-ms 8000
+\end{lstlisting}
+
+Conceptualmente, la condicion temporal es:
+
+\[
+    |t_{texto} - t_{vision}| \leq ventana
+\]
+
+Si una pareja de eventos esta dentro de la ventana, el integrador pasa a validar la compatibilidad semantica.
+
+\subsubsection{Validacion semantica}
+
+La accion final solo se ejecuta si la combinacion \codepath{(intencion_textual, intencion_visual)} esta dentro de la tabla de fusiones validas.
+
+\begin{longtable}{p{0.27\linewidth} p{0.25\linewidth} p{0.36\linewidth}}
+\toprule
+\textbf{Intencion textual} & \textbf{Intencion visual} & \textbf{Accion final} \\
+\midrule
+\codepath{anadir_ingredientes} & \codepath{iniciar_receta} & Recomendar receta usando los ingredientes indicados por texto. \\
+\codepath{recomendar_receta} & \codepath{iniciar_receta} & Confirmar el inicio de la receta solicitada. \\
+\codepath{ajustar_raciones} & \codepath{aumentar_raciones} & Escalar o partir la receta al numero de raciones indicado. \\
+\codepath{sustituir_ingrediente} & \codepath{marcar_sustitucion} & Aplicar la sustitucion indicada por el canal textual. \\
+\bottomrule
+\end{longtable}
+
+Si la combinacion no esta en esa tabla, el integrador la rechaza aunque los eventos sean temporalmente cercanos. Por ejemplo, \codepath{lista_compra + iniciar_receta} se ignora.
+
+\capturapendiente{captura_integrador_fusion.png}{Integrador mostrando fusiones validas y acciones finales en consola.}
+
+\subsubsection{Evidencia de funcionamiento}
+
+En la prueba real de la aplicacion base se observaron fusiones validas como:
+
+\begin{lstlisting}[caption={Salida esperada de la fusion base.}]
+[texto] anadir_ingredientes
+[vision] iniciar_receta
+FUSION VALIDA: texto='anadir_ingredientes' + gesto='iniciar_receta'
+RECETA PROPUESTA: Tostas de tomate aprovechado
+
+[texto] sustituir_ingrediente
+[vision] marcar_sustitucion
+FUSION VALIDA: texto='sustituir_ingrediente' + gesto='marcar_sustitucion'
+SUSTITUCION: queso -> queso sin lactosa o levadura nutricional
+\end{lstlisting}
+
+\subsubsection{Codigo involucrado en el punto 3}
+
+Ficheros relevantes:
+
+\begin{itemize}
+    \item \codepath{IntegradorMultimodal.py}: memoria temporal, validacion semantica y acciones finales.
+    \item \codepath{multimodal_utils.py}: escritura atomica de eventos JSON.
+    \item \codepath{lanzar_app_final.ps1}: arranque de las tres terminales de la demo obligatoria.
+\end{itemize}
+
+Fragmento clave: el integrador solo ejecuta acciones si la pareja texto-vision esta dentro de la tabla de fusiones validas.
+
+\begin{lstlisting}[language=Python, caption={Tabla de fusiones validas.}]
+VALID_FUSIONS = {
+    ("anadir_ingredientes", "iniciar_receta"): "recomendar_receta_con_ingredientes",
+    ("recomendar_receta", "iniciar_receta"): "confirmar_recomendacion_receta",
+    ("ajustar_raciones", "aumentar_raciones"): "partir_en_mas_raciones",
+    ("sustituir_ingrediente", "marcar_sustitucion"): "sustituir_ingrediente",
+}
+\end{lstlisting}
+
+\section{Descripcion de las ampliaciones}
+
+\subsection{Ampliacion A: Embeddings multimodales Vision + Texto}
+
+\subsubsection{Objetivo}
+
+La ampliacion opcional implementada sustituye parte de la logica unimodal por un modelo de embeddings multimodales. Se utiliza CLIP, concretamente \codepath{openai/clip-vit-base-patch32}, mediante \codepath{transformers}. La idea es proyectar comandos textuales libres y recortes visuales de la mano en un espacio semantico compartido, para realizar emparejamiento zero-shot con similitud coseno.
+
+\subsubsection{Arquitectura de la ampliacion}
+
+En este modo no se ejecutan simultaneamente \codepath{vision/main.py} ni \codepath{main_chef_zero_waste.py}. El script \codepath{clip_zero_shot_multimodal.py} hace de canal multimodal zero-shot y publica eventos compatibles con el integrador existente.
+
+\begin{figure}[H]
+    \centering
+    \resizebox{\linewidth}{!}{%
+    \begin{tikzpicture}[
+        node distance=1.5cm,
+        box/.style={rectangle, rounded corners, draw=black!65, fill=blue!5, align=center, minimum width=3.4cm, minimum height=1cm},
+        clip/.style={rectangle, rounded corners, draw=black!65, fill=purple!10, align=center, minimum width=3.8cm, minimum height=1.1cm},
+        event/.style={rectangle, draw=black!65, fill=yellow!15, align=center, minimum width=3.4cm, minimum height=0.9cm},
+        action/.style={rectangle, rounded corners, draw=black!65, fill=green!12, align=center, minimum width=4cm, minimum height=1cm},
+        arrow/.style={-{Latex[length=3mm]}, thick}
+    ]
+        \node[box] (texto) {Comando textual libre};
+        \node[box, below=of texto] (camara) {Camara\\recorte de mano};
+        \node[clip, right=2cm of texto, yshift=-0.75cm] (clip) {CLIP\\embeddings texto + imagen};
+        \node[event, right=2cm of clip, yshift=0.75cm] (evtexto) {\codepath{event_text.json}};
+        \node[event, right=2cm of clip, yshift=-0.75cm] (evvision) {\codepath{event_vision.json}};
+        \node[box, right=2cm of evtexto, yshift=-0.75cm] (integrador) {Integrador\\sin cambios};
+        \node[action, right=of integrador] (accion) {Accion final};
+
+        \draw[arrow] (texto) -- (clip);
+        \draw[arrow] (camara) -- (clip);
+        \draw[arrow] (clip) -- (evtexto);
+        \draw[arrow] (clip) -- (evvision);
+        \draw[arrow] (evtexto) -- (integrador);
+        \draw[arrow] (evvision) -- (integrador);
+        \draw[arrow] (integrador) -- (accion);
+    \end{tikzpicture}
+    }
+    \caption{Arquitectura de la ampliacion zero-shot con CLIP.}
+    \label{fig:arquitectura-clip}
+\end{figure}
+
+\subsubsection{Modelo y espacio compartido}
+
+CLIP genera embeddings normalizados para texto e imagen. Dado un embedding visual \(v\) y un embedding textual \(t\), la similitud se calcula como:
+
+\[
+    sim(v,t) = \frac{v \cdot t}{\|v\|\|t\|}
+\]
+
+En el codigo, como los embeddings se normalizan previamente, la similitud coseno se obtiene con un producto escalar. El sistema compara:
+
+\begin{itemize}
+    \item El comando textual libre del usuario.
+    \item El recorte de mano detectado por MediaPipe Tasks.
+    \item Prompts descriptivos de los tres gestos obligatorios.
+\end{itemize}
+
+El modelo CLIP se descarga y queda cacheado localmente en:
+
+\begin{center}
+\codepath{C:\Users\Control Lunar\.cache\huggingface\hub\models--openai--clip-vit-base-patch32}
+\end{center}
+
+Para el recorte de mano se utiliza:
+
+\begin{center}
+\codepath{models/hand_landmarker.task}
+\end{center}
+
+\subsubsection{Gestos obligatorios conservados}
+
+La ampliacion conserva los tres gestos obligatorios y sus intenciones:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{Gesto} & \textbf{Intencion visual} & \textbf{Intencion textual generada} \\
+        \midrule
+        \codepath{pizca_sal} & \codepath{iniciar_receta} & \codepath{anadir_ingredientes} \\
+        \codepath{corte_cuchillo} & \codepath{aumentar_raciones} & \codepath{ajustar_raciones} \\
+        \codepath{sustituir_ingrediente} & \codepath{marcar_sustitucion} & \codepath{sustituir_ingrediente} \\
+        \bottomrule
+    \end{tabular}
+    \caption{Equivalencia semantica usada por CLIP para publicar eventos compatibles con el integrador.}
+    \label{tab:clip-gestos}
+\end{table}
+
+\subsubsection{Comandos zero-shot}
+
+El usuario puede inventar comandos nuevos en tiempo real. Ejemplos probados:
+
+\begin{itemize}
+    \item \codepath{quiero empezar a cocinar con tomate pan y queso}
+    \item \codepath{divide la receta para 4 personas}
+    \item \codepath{cambia queso por una alternativa sin lactosa}
+\end{itemize}
+
+El sistema extrae entidades simples del texto libre: ingredientes conocidos, numero de raciones y restricciones como \codepath{sin_lactosa}. Asi, aunque el texto no pase por el clasificador BoW original, el integrador puede seguir generando una accion final concreta.
+
+\capturapendiente{captura_clip_ventana.png}{Ventana CLIP mostrando el recorte de mano, la intencion textual y la compatibilidad zero-shot.}
+
+\capturapendiente{captura_clip_logs.png}{Logs de la ampliacion CLIP y del integrador con tres fusiones validas.}
+
+\subsubsection{Evidencia de funcionamiento de la ampliacion}
+
+La prueba final de la ampliacion produjo las tres fusiones esperadas:
+
+\begin{lstlisting}[caption={Logs resumidos de la ampliacion CLIP.}]
+Texto: iniciar_receta | gesto=pizca_sal | score=0.8551
+Camara recorte mano: iniciar_receta | gesto=pizca_sal | score=0.2541
+Eventos zero-shot publicados para el integrador.
+
+Texto: aumentar_raciones | gesto=corte_cuchillo | score=0.8742
+Camara recorte mano: aumentar_raciones | gesto=corte_cuchillo | score=0.2903
+Eventos zero-shot publicados para el integrador.
+
+Texto: marcar_sustitucion | gesto=sustituir_ingrediente | score=0.8606
+Camara recorte mano: marcar_sustitucion | gesto=sustituir_ingrediente | score=0.2985
+Eventos zero-shot publicados para el integrador.
+\end{lstlisting}
+
+El integrador recibio esos eventos y ejecuto las acciones finales:
+
+\begin{lstlisting}[caption={Logs resumidos del integrador usando eventos publicados por CLIP.}]
+FUSION VALIDA: texto='anadir_ingredientes' + gesto='iniciar_receta'
+RECETA PROPUESTA: Tostas de tomate aprovechado
+
+FUSION VALIDA: texto='ajustar_raciones' + gesto='aumentar_raciones'
+RACIONES: Dividir o escalar la receta para 4 raciones.
+
+FUSION VALIDA: texto='sustituir_ingrediente' + gesto='marcar_sustitucion'
+SUSTITUCION: queso -> queso sin lactosa o levadura nutricional (sin_lactosa)
+\end{lstlisting}
+
+\subsubsection{Ejecucion de la ampliacion}
+
+La ampliacion se lanza con:
+
+\begin{lstlisting}[caption={Lanzamiento de la ampliacion CLIP.}]
+powershell -ExecutionPolicy Bypass -File .\lanzar_ampliacion_clip.ps1
+\end{lstlisting}
+
+El lanzador abre dos terminales:
+
+\begin{itemize}
+    \item Integrador con \codepath{python IntegradorMultimodal.py --window-ms 8000}.
+    \item Demo zero-shot con \codepath{python clip_zero_shot_multimodal.py}.
+\end{itemize}
+
+No debe ejecutarse \codepath{vision/main.py} al mismo tiempo, porque ambos modos usan la webcam.
+
+\subsubsection{Codigo involucrado en la ampliacion}
+
+Ficheros relevantes:
+
+\begin{itemize}
+    \item \codepath{clip_zero_shot_multimodal.py}: carga CLIP, recorta la mano, calcula similitudes y publica eventos.
+    \item \codepath{lanzar_ampliacion_clip.ps1}: arranque del integrador y demo CLIP.
+    \item \codepath{models/hand_landmarker.task}: detector de mano usado para recortar la region visual.
+    \item \codepath{IntegradorMultimodal.py}: se reutiliza sin cambiar su contrato de entrada.
+\end{itemize}
+
+Fragmento clave: texto e imagen se normalizan y se comparan con producto escalar, equivalente a similitud coseno.
+
+\begin{lstlisting}[language=Python, caption={Comparacion CLIP en espacio compartido.}]
+image_embedding = normalize(model.get_image_features(**image_inputs))
+text_embedding = normalize(model.get_text_features(**text_inputs))
+similarity = float(np.dot(image_embedding, text_embedding))
+\end{lstlisting}
+
+\subsection{Ampliacion B: Integracion de voz en tiempo real}
+
+\subsubsection{Objetivo}
+
+La ampliacion B elimina la introduccion manual de texto por teclado. En vez de escribir en \codepath{main_chef_zero_waste.py}, el usuario habla por el microfono. El audio real se captura, se transcribe con un motor ASR local y la frase resultante se introduce en el mismo modulo PLN de ChefZeroWaste.
+
+\subsubsection{Arquitectura de la ampliacion}
+
+Se ha anadido el script:
+
+\begin{center}
+\codepath{voz_asr_chef_zero_waste.py}
+\end{center}
+
+Este canal usa \codepath{sounddevice} para capturar audio y \codepath{faster-whisper} con el modelo \codepath{Systran/faster-whisper-medium} para transcribir la frase. Despues reutiliza \codepath{CanalTextoChefZeroWaste.py} para clasificar intencion, extraer entidades y publicar \codepath{event_text.json}.
+
+\begin{figure}[H]
+    \centering
+    \resizebox{\linewidth}{!}{%
+    \begin{tikzpicture}[
+        node distance=1.5cm,
+        box/.style={rectangle, rounded corners, draw=black!65, fill=blue!5, align=center, minimum width=3.3cm, minimum height=1cm},
+        asr/.style={rectangle, rounded corners, draw=black!65, fill=orange!15, align=center, minimum width=3.7cm, minimum height=1cm},
+        event/.style={rectangle, draw=black!65, fill=yellow!15, align=center, minimum width=3.4cm, minimum height=0.9cm},
+        action/.style={rectangle, rounded corners, draw=black!65, fill=green!12, align=center, minimum width=4cm, minimum height=1cm},
+        arrow/.style={-{Latex[length=3mm]}, thick}
+    ]
+        \node[box] (gesto) {Gesto visual\\ocurre primero};
+        \node[event, right=of gesto] (evvision) {\codepath{event_vision.json}};
+        \node[box, below=1.6cm of gesto] (micro) {Microfono\\audio real};
+        \node[asr, right=of micro] (asr) {ASR Whisper\\transcripcion};
+        \node[box, right=of asr] (pln) {PLN\\ChefZeroWaste};
+        \node[event, right=of pln] (evtexto) {\codepath{event_text.json}};
+        \node[box, right=2cm of evvision, yshift=-0.8cm] (integrador) {Integrador\\ventana 15000 ms};
+        \node[action, right=of integrador] (accion) {Accion final};
+
+        \draw[arrow] (gesto) -- (evvision);
+        \draw[arrow] (micro) -- (asr);
+        \draw[arrow] (asr) -- (pln);
+        \draw[arrow] (pln) -- (evtexto);
+        \draw[arrow] (evvision) -- (integrador);
+        \draw[arrow] (evtexto) -- (integrador);
+        \draw[arrow] (integrador) -- (accion);
+    \end{tikzpicture}
+    }
+    \caption{Arquitectura de la ampliacion de voz en tiempo real.}
+    \label{fig:arquitectura-voz}
+\end{figure}
+
+\subsubsection{Captura de audio y transcripcion}
+
+El canal de voz implementa una deteccion simple de actividad de voz:
+
+\begin{enumerate}
+    \item Calibra el ruido ambiente.
+    \item Calcula energia RMS por bloques de audio.
+    \item Empieza a grabar cuando la energia supera el umbral de inicio.
+    \item Termina la frase cuando detecta silencio durante un tiempo suficiente.
+    \item Transcribe el audio con Whisper.
+    \item Clasifica la frase transcrita con el PLN.
+\end{enumerate}
+
+El evento textual publicado conserva el contrato del integrador y anade metadatos ASR:
+
+\begin{lstlisting}[caption={Ejemplo de evento textual generado por voz.}]
+{
+  "source": "text",
+  "intent": "anadir_ingredientes",
+  "raw_text": "tengo tomate pan y queso",
+  "entities": {
+    "ingredientes": ["tomate", "pan", "queso"],
+    "ingrediente_principal": "tomate"
+  },
+  "asr": true,
+  "asr_engine": "faster-whisper",
+  "asr_language": "es"
+}
+\end{lstlisting}
+
+\capturapendiente{captura_voz_asr.png}{Canal de voz detectando frase, transcribiendo con Whisper y publicando evento textual.}
+
+\subsubsection{Reto de asincronia real}
+
+El requisito especifica que en comunicacion humana natural el gesto suele preceder a la voz. Para demostrarlo, el lanzador de esta ampliacion ejecuta el integrador con una ventana temporal mas amplia:
+
+\begin{lstlisting}[caption={Integrador con memoria temporal para la ampliacion de voz.}]
+python IntegradorMultimodal.py --window-ms 15000
+\end{lstlisting}
+
+La secuencia esperada es:
+
+\begin{enumerate}
+    \item El usuario hace el gesto, por ejemplo \codepath{pizca_sal}.
+    \item El canal visual publica \codepath{iniciar_receta}.
+    \item El usuario dice una frase, por ejemplo ``tengo tomate pan y queso''.
+    \item El canal ASR espera a que termine la frase, transcribe y clasifica \codepath{anadir_ingredientes}.
+    \item El integrador todavia conserva el gesto en memoria y fusiona ambos eventos.
+\end{enumerate}
+
+Esto demuestra que el sistema no depende de simultaneidad exacta: el gesto puede quedar guardado mientras termina el procesamiento de voz.
+
+\subsubsection{Ejecucion}
+
+La ampliacion se lanza con:
+
+\begin{lstlisting}[caption={Lanzamiento de la ampliacion de voz.}]
+powershell -ExecutionPolicy Bypass -File .\lanzar_ampliacion_voz.ps1
+\end{lstlisting}
+
+El lanzador abre:
+
+\begin{itemize}
+    \item Integrador con ventana de 15000 ms.
+    \item Canal visual de gestos.
+    \item Canal de voz ASR.
+\end{itemize}
+
+Comandos auxiliares:
+
+\begin{lstlisting}[caption={Comandos auxiliares del canal ASR.}]
+python voz_asr_chef_zero_waste.py --list-devices
+python voz_asr_chef_zero_waste.py --demo-text "tengo tomate pan y queso"
+\end{lstlisting}
+
+\subsubsection{Codigo involucrado en la ampliacion}
+
+Ficheros relevantes:
+
+\begin{itemize}
+    \item \codepath{voz_asr_chef_zero_waste.py}: captura microfono, detecta voz/silencio, transcribe y llama al PLN.
+    \item \codepath{lanzar_ampliacion_voz.ps1}: arranca integrador, vision y ASR.
+    \item \codepath{CanalTextoChefZeroWaste.py}: reutilizado para clasificar la transcripcion y publicar \codepath{event_text.json}.
+    \item \codepath{IntegradorMultimodal.py}: mantiene el gesto en memoria hasta que llega la transcripcion.
+\end{itemize}
+
+Fragmento clave: el canal ASR espera silencio final antes de transcribir y publicar el texto.
+
+\begin{lstlisting}[language=Python, caption={Final de frase por silencio en el canal ASR.}]
+if duration_seconds >= min_phrase_seconds and silence_seconds >= end_silence_seconds:
+    audio = np.concatenate(chunks)
+    text, metadata = transcribe_audio(whisper, audio, language="es")
+    processor.process_sentence(text, metadata)
+\end{lstlisting}
+
+\section{Instrucciones de ejecucion}
+
+\subsection{Aplicacion obligatoria}
+
+\begin{lstlisting}[caption={Lanzar la aplicacion final obligatoria.}]
+cd "C:\Users\Control Lunar\Desktop\IMM_Trabajos\Grupo\Trabajo_Grupo_02_Integracion_Multimodal"
+powershell -ExecutionPolicy Bypass -File .\lanzar_app_final.ps1
+\end{lstlisting}
+
+Este lanzador abre tres terminales:
+
+\begin{itemize}
+    \item Integrador.
+    \item Canal visual de gestos.
+    \item Canal textual ChefZeroWaste.
+\end{itemize}
+
+\subsection{Ampliacion CLIP}
+
+\begin{lstlisting}[caption={Lanzar la ampliacion de embeddings multimodales.}]
+cd "C:\Users\Control Lunar\Desktop\IMM_Trabajos\Grupo\Trabajo_Grupo_02_Integracion_Multimodal"
+powershell -ExecutionPolicy Bypass -File .\lanzar_ampliacion_clip.ps1
+\end{lstlisting}
+
+Controles del modo CLIP:
+
+\begin{itemize}
+    \item \codepath{ESPACIO} o \codepath{ENTER}: analiza el recorte de mano y publica si coincide con el texto.
+    \item \codepath{T}: cambia el comando textual.
+    \item \codepath{Q} o \codepath{ESC}: sale del modo CLIP.
+\end{itemize}
+
+\subsection{Ampliacion voz ASR}
+
+\begin{lstlisting}[caption={Lanzar la ampliacion de voz en tiempo real.}]
+cd "C:\Users\Control Lunar\Desktop\IMM_Trabajos\Grupo\Trabajo_Grupo_02_Integracion_Multimodal"
+powershell -ExecutionPolicy Bypass -File .\lanzar_ampliacion_voz.ps1
+\end{lstlisting}
+
+En esta demo se recomienda hacer primero el gesto y despues hablar. El integrador mantiene el gesto en memoria durante 15000 ms para esperar a que el canal ASR termine de transcribir.
+
+\section{Capturas recomendadas para completar la entrega}
+
+El documento ya contiene llamadas a capturas que compilan aunque no existan. Para completar la version final del PDF, se recomienda guardar las siguientes imagenes en la carpeta \codepath{figuras/}:
+
+\begin{longtable}{p{0.36\linewidth} p{0.52\linewidth}}
+\toprule
+\textbf{Archivo} & \textbf{Contenido recomendado} \\
+\midrule
+\codepath{captura_dataset.png} & Vista de carpetas del dataset con las clases. \\
+\codepath{captura_captura_datos.png} & Script de captura funcionando con la webcam. \\
+\codepath{captura_colab_entrenamiento.png} & Cuaderno de Google Colab con entrenamiento Model Maker. \\
+\codepath{captura_vision_gestos.png} & Canal visual reconociendo un gesto y publicando evento. \\
+\codepath{captura_chat_pln.png} & Canal textual clasificando una frase y guardando entidades. \\
+\codepath{captura_integrador_fusion.png} & Integrador mostrando una fusion valida y una accion final. \\
+\codepath{captura_clip_ventana.png} & Ventana CLIP con rectangulo sobre la mano y texto compatible. \\
+\codepath{captura_clip_logs.png} & Logs CLIP + integrador con las tres pruebas de ampliacion. \\
+\codepath{captura_voz_asr.png} & Canal de voz transcribiendo una frase y fusionandose con un gesto previo. \\
+\bottomrule
+\end{longtable}
+
+\end{document}
