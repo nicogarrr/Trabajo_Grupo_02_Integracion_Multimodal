@@ -224,14 +224,12 @@ El dataset local se encuentra en \codepath{vision/dataset}. La distribucion fina
 
 La captura de muestras se realizo con el script \codepath{vision/captura_datos.py}. Este script abre la webcam, permite indicar la clase que se esta capturando y guarda las imagenes en la carpeta correspondiente del dataset. La estructura final permite que Model Maker cargue automaticamente cada subcarpeta como una clase.
 
-\capturapendiente{captura_captura_datos.png}{Ejecucion del script de captura mostrando la webcam y guardado de muestras.}
-
 \subsubsection{Transfer Learning con Model Maker}
 
 El entrenamiento se realizo en Google Colab mediante el cuaderno:
 
 \begin{center}
-\codepath{vision/Entrenamiento_Gestos.ipynb}
+\codepath{Entrenamiento_Gestos (1).ipynb}
 \end{center}
 
 El cuaderno usa MediaPipe Model Maker para aplicar transfer learning sobre los modelos base de deteccion y representacion de manos. La practica conserva tambien un script equivalente para entrenamiento local:
@@ -249,8 +247,6 @@ El flujo de entrenamiento fue:
     \item Entrenar la capa final de clasificacion empleando \texttt{gesture\_recognizer.}\allowbreak\texttt{GestureRecognizer.create(...)}.
     \item Exportar el modelo final con \codepath{model.export_model()}.
 \end{enumerate}
-
-\capturapendiente{captura_colab_entrenamiento.png}{Entrenamiento en Google Colab con MediaPipe Model Maker.}
 
 El modelo final exportado se encuentra en:
 
@@ -281,7 +277,7 @@ El codigo completo esta incluido en la entrega. Los ficheros relevantes son:
 \begin{itemize}
     \item \codepath{vision/captura_datos.py}: captura muestras desde webcam y las guarda por clase.
     \item \codepath{vision/entrenar_gestos.py}: version local del entrenamiento con Model Maker.
-    \item \codepath{vision/Entrenamiento_Gestos.ipynb}: cuaderno usado en Colab.
+    \item \codepath{Entrenamiento_Gestos (1).ipynb}: cuaderno usado para el entrenamiento.
     \item \codepath{vision/main.py}: ejecucion del canal visual y publicacion de eventos.
     \item \codepath{vision/gesture_recognizer.task}: modelo final exportado.
 \end{itemize}
@@ -342,7 +338,13 @@ El canal textual publica eventos en \codepath{event_text.json}. Estos eventos in
 }
 \end{lstlisting}
 
-\capturapendiente{captura_chat_pln.png}{Consola de \codepath{main_chef_zero_waste.py} clasificando texto y publicando \codepath{event_text.json}.}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.92\linewidth]{figuras/Imagen_Main.png}\\[0.35cm]
+    \includegraphics[width=0.92\linewidth]{figuras/Imagen_Main2.png}
+    \caption{Consola de \codepath{main_chef_zero_waste.py} clasificando texto y publicando \codepath{event_text.json}.}
+    \label{fig:captura-chat-pln}
+\end{figure}
 
 \subsubsection{Complementariedad texto-vision}
 
@@ -581,9 +583,23 @@ El usuario puede inventar comandos nuevos en tiempo real. Ejemplos probados:
 
 El sistema extrae entidades simples del texto libre: ingredientes conocidos, numero de raciones y restricciones como \codepath{sin_lactosa}. Asi, aunque el texto no pase por el clasificador BoW original, el integrador puede seguir generando una accion final concreta.
 
-\capturapendiente{captura_clip_ventana.png}{Ventana CLIP mostrando el recorte de mano, la intencion textual y la compatibilidad zero-shot.}
-
-\capturapendiente{captura_clip_logs.png}{Logs de la ampliacion CLIP y del integrador con tres fusiones validas.}
+\begin{figure}[H]
+    \centering
+    \IfFileExists{capturas/ampliacion_a.png}{
+        \includegraphics[width=0.92\linewidth]{capturas/ampliacion_a.png}
+    }{
+        \fbox{
+            \begin{minipage}[c][5.5cm][c]{0.88\linewidth}
+                \centering
+                \textbf{Captura pendiente}\\[0.25cm]
+                Guardar como \codepath{capturas/ampliacion_a.png}\\[0.25cm]
+                Evidencia de funcionamiento de la ampliacion A.
+            \end{minipage}
+        }
+    }
+    \caption{Evidencia de funcionamiento de la ampliacion A con CLIP.}
+    \label{fig:ampliacion-a}
+\end{figure}
 
 \subsubsection{Evidencia de funcionamiento de la ampliacion}
 
@@ -1307,27 +1323,5 @@ Esta demo abre tres terminales: integrador, head tracking con gestos combinados,
     \item Escribir la frase en el chat PLN.
     \item Verificar que el integrador muestra \codepath{FOCO DE ATENCION} junto con la fusion.
 \end{enumerate}
-
-\section{Capturas recomendadas para completar la entrega}
-
-El documento ya contiene llamadas a capturas que compilan aunque no existan. Para completar la version final del PDF, se recomienda guardar las siguientes imagenes en la carpeta \codepath{figuras/}:
-
-\begin{longtable}{p{0.41\linewidth} p{0.50\linewidth}}
-\toprule
-\textbf{Archivo} & \textbf{Contenido recomendado} \\
-\midrule
-\codepath{captura_dataset.png} & Vista de carpetas del dataset con las clases. \\
-\codepath{captura_captura_datos.png} & Script de captura funcionando con la webcam. \\
-\codepath{captura_colab_entrenamiento.png} & Cuaderno de Google Colab con entrenamiento Model Maker. \\
-\codepath{captura_vision_gestos.png} & Canal visual reconociendo un gesto y publicando evento. \\
-\codepath{captura_chat_pln.png} & Canal textual clasificando una frase y guardando entidades. \\
-\codepath{captura_integrador_fusion.png} & Integrador mostrando una fusion valida y una accion final. \\
-\codepath{captura_clip_ventana.png} & Ventana CLIP con rectangulo sobre la mano y texto compatible. \\
-\codepath{captura_clip_logs.png} & Logs CLIP + integrador con las tres pruebas de ampliacion. \\
-\codepath{captura_voz_asr.png} & Canal de voz transcribiendo una frase y fusionandose con un gesto previo. \\
-\codepath{captura_desambiguacion.png} & Integrador mostrando desambiguacion mutua: gesto claro corrigiendo frase ambigua. \\
-\codepath{captura_gaze_tracking.png} & Head tracking mostrando ejes de orientacion, zona detectada y gesto. \\
-\bottomrule
-\end{longtable}
 
 \end{document}
